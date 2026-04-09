@@ -2,11 +2,6 @@ name: Fix and Deploy (Reusable)
 
 on:
   workflow_call:
-    inputs:
-      branch:
-        required: false
-        type: string
-        default: master
 
 permissions:
   contents: write
@@ -19,22 +14,26 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
       - name: Normalize filenames
         run: |
           dirty=false
-          match=$(find . -maxdepth 1 -regex './index ([0-9]+)\.html' -print -quit)
+
+          match=$(find . -maxdepth 1 -regextype posix-extended -regex './index \([0-9]+\)\.html' -print -quit)
           if [[ -n "$match" ]]; then
             mv "$match" ./index.html
             dirty=true
           fi
-          match=$(find . -maxdepth 1 -regex './style_css ([0-9]+)\.txt' -print -quit)
+
+          match=$(find . -maxdepth 1 -regextype posix-extended -regex './style_css \([0-9]+\)\.txt' -print -quit)
           if [[ -n "$match" ]]; then
             mv "$match" ./style_css.txt
             dirty=true
           fi
+
           if [[ "$dirty" == "true" ]]; then
             git config user.name "github-actions"
             git config user.email "actions@github.com"
@@ -42,6 +41,34 @@ jobs:
             git commit -m "fix: normalize filenames"
             git push
           fi
+
+      - name: Create README.md if missing
+        run: |
+          if [[ -f README.md ]]; then
+            echo "README.md already exists, skipping"
+            exit 0
+          fi
+
+          OWNER="${{ github.repository_owner }}"
+          REPO="${{ github.event.repository.name }}"
+
+          if [[ "$REPO" == "$OWNER.github.io" ]]; then
+            PAGE_URL="https://$OWNER.github.io/"
+          else
+            PAGE_URL="https://$OWNER.github.io/$REPO/"
+          fi
+
+          cat > README.md <<EOF
+          # $REPO
+
+          Live site: [$PAGE_URL]($PAGE_URL)
+          EOF
+
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add README.md
+          git commit -m "docs: add README with GitHub Pages link"
+          git push
 
       - name: Rename CSS for deployment
         run: |
