@@ -10,13 +10,14 @@ permissions:
 
 jobs:
   fix-and-deploy:
+    runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout caller repo
+        uses: actions/checkout@v4
 
       - name: Normalize filenames
         run: |
@@ -49,8 +50,8 @@ jobs:
             exit 0
           fi
 
-          OWNER="${{ github.repository_owner }}"
-          REPO="${{ github.event.repository.name }}"
+          OWNER="${GITHUB_REPOSITORY%/*}"
+          REPO="${GITHUB_REPOSITORY#*/}"
 
           if [[ "$REPO" == "$OWNER.github.io" ]]; then
             PAGE_URL="https://$OWNER.github.io/"
@@ -83,7 +84,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: '.'
+          path: .
 
       - name: Deploy to GitHub Pages
         id: deployment
