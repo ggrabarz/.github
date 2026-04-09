@@ -1,4 +1,5 @@
 name: Bootstrap all repos (Pages only)
+
 on:
   workflow_dispatch:
 
@@ -7,6 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+
     steps:
       - name: Generate caller workflow content
         id: content
@@ -15,7 +17,11 @@ jobs:
           name: Fix and Deploy
           on:
             push:
-              branches: [master]
+              branches:
+                - master
+                - main
+              paths-ignore:
+                - README.md
           permissions:
             contents: write
             pages: write
@@ -28,41 +34,75 @@ jobs:
               uses: ggrabarz/.github/.github/workflows/fix-and-deploy.yml@master
           EOF
           )
-          echo "encoded=$(echo "$WORKFLOW" | base64 -w0)" >> "$GITHUB_OUTPUT"
+
+          echo "encoded=$(printf '%s' "$WORKFLOW" | base64 -w0)" >> "$GITHUB_OUTPUT"
 
       - name: Fetch all Pages-enabled repos
         id: repos
         run: |
-          REPOS=$(curl -s \
-            -H "Authorization: token $GH_TOKEN" \
-            "https://api.github.com/user/repos?per_page=100&type=owner" \
-            | jq -r '.[] | select(.has_pages == true) | .full_name')
+          : > repos.txt
+          page=1
+
+          while true; do
+            RESPONSE=$(curl -s \
+              -H "Authorization: token $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/user/repos?per_page=100&page=$page&type=owner")
+
+            COUNT=$(echo "$RESPONSE" | jq 'length')
+            if [[ "$COUNT" -eq 0 ]]; then
+              break
+            fi
+
+            echo "$RESPONSE" | jq -r '.[] | select(.has_pages == true) | .full_name' >> repos.txt
+            page=$((page + 1))
+          done
+
           echo "list<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$REPOS" >> "$GITHUB_OUTPUT"
+          cat repos.txt >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
 
       - name: Push caller workflow to each repo
         run: |
           ENCODED="${{ steps.content.outputs.encoded }}"
+
           while IFS= read -r repo; do
-            [ -z "$repo" ] && continue
+            [[ -z "$repo" ]] && continue
+
             echo "→ Pushing to $repo..."
+
+            EXISTING=$(curl -s \
+              -H "Authorization: token $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$repo/contents/.github/workflows/deploy.yml")
+
+            SHA=$(echo "$EXISTING" | jq -r '.sha // empty')
+
+            if [[ -n "$SHA" ]]; then
+              PAYLOAD=$(jq -n \
+                --arg message "ci: update shared deploy workflow" \
+                --arg content "$ENCODED" \
+                --arg sha "$SHA" \
+                '{message: $message, content: $content, sha: $sha}')
+            else
+              PAYLOAD=$(jq -n \
+                --arg message "ci: add shared deploy workflow" \
+                --arg content "$ENCODED" \
+                '{message: $message, content: $content}')
+            fi
 
             RESPONSE=$(curl -s -X PUT \
               -H "Authorization: token $GH_TOKEN" \
               -H "Accept: application/vnd.github+json" \
               "https://api.github.com/repos/$repo/contents/.github/workflows/deploy.yml" \
-              -d "{
-                \"message\": \"ci: add shared deploy workflow\",
-                \"content\": \"$ENCODED\"
-              }")
+              -d "$PAYLOAD")
 
             URL=$(echo "$RESPONSE" | jq -r '.content.html_url // empty')
             ERROR=$(echo "$RESPONSE" | jq -r '.message // empty')
 
-            if [ -n "$URL" ]; then
-              echo "  ✅ Created: $URL"
+            if [[ -n "$URL" ]]; then
+              echo "  ✅ Success: $URL"
             else
-              echo "  ⏭️  Skipped ($ERROR)"
+              echo "  ⏭️ Skipped ($ERROR)"
             fi
           done <<< "${{ steps.repos.outputs.list }}"
