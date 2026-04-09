@@ -15,6 +15,7 @@ jobs:
         run: |
           WORKFLOW=$(cat <<'EOF'
           name: Fix and Deploy
+
           on:
             push:
               branches:
@@ -22,13 +23,16 @@ jobs:
                 - main
               paths-ignore:
                 - README.md
+
           permissions:
             contents: write
             pages: write
             id-token: write
+
           concurrency:
             group: pages
             cancel-in-progress: false
+
           jobs:
             deploy:
               uses: ggrabarz/.github/.github/workflows/fix-and-deploy.yml@master
