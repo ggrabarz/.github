@@ -1,0 +1,67 @@
+name: Bootstrap all repos (Pages only)
+on:
+  workflow_dispatch:
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+    steps:
+      - name: Generate caller workflow content
+        id: content
+        run: |
+          WORKFLOW=$(cat <<'EOF'
+          name: Fix and Deploy
+          on:
+            push:
+              branches: [master]
+          permissions:
+            contents: write
+            pages: write
+            id-token: write
+          concurrency:
+            group: pages
+            cancel-in-progress: false
+          jobs:
+            deploy:
+              uses: ggrabarz/.github/.github/workflows/fix-and-deploy.yml@master
+          EOF
+          )
+          echo "encoded=$(echo "$WORKFLOW" | base64 -w0)" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch all Pages-enabled repos
+        id: repos
+        run: |
+          REPOS=$(curl -s \
+            -H "Authorization: token $GH_TOKEN" \
+            "https://api.github.com/user/repos?per_page=100&type=owner" \
+            | jq -r '.[] | select(.has_pages == true) | .full_name')
+          echo "list<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$REPOS" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Push caller workflow to each repo
+        run: |
+          while IFS= read -r repo; do
+            [ -z "$repo" ] && continue
+            echo "→ Pushing to $repo..."
+
+            RESPONSE=$(curl -s -X PUT \
+              -H "Authorization: token $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$repo/contents/.github/workflows/deploy.yml" \
+              -d '{
+                "message": "ci: add shared deploy workflow",
+                "content": "${{ steps.content.outputs.encoded }}"
+              }')
+
+            URL=$(echo "$RESPONSE" | jq -r '.content.html_url // empty')
+            ERROR=$(echo "$RESPONSE" | jq -r '.message // empty')
+
+            if [ -n "$URL" ]; then
+              echo "  ✅ Created: $URL"
+            else
+              echo "  ⏭️  Skipped ($ERROR)"
+            fi
+          done <<< "${{ steps.repos.outputs.list }}"
