@@ -1,0 +1,63 @@
+name: Fix and Deploy (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      branch:
+        required: false
+        type: string
+        default: master
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  fix-and-deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Normalize filenames
+        run: |
+          dirty=false
+          match=$(find . -maxdepth 1 -regex './index ([0-9]+)\.html' -print -quit)
+          if [[ -n "$match" ]]; then
+            mv "$match" ./index.html
+            dirty=true
+          fi
+          match=$(find . -maxdepth 1 -regex './style_css ([0-9]+)\.txt' -print -quit)
+          if [[ -n "$match" ]]; then
+            mv "$match" ./style_css.txt
+            dirty=true
+          fi
+          if [[ "$dirty" == "true" ]]; then
+            git config user.name "github-actions"
+            git config user.email "actions@github.com"
+            git add -A
+            git commit -m "fix: normalize filenames"
+            git push
+          fi
+
+      - name: Rename CSS for deployment
+        run: |
+          for f in *_css.txt; do
+            [ -e "$f" ] || continue
+            mv "$f" "${f%_css.txt}.css"
+          done
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
