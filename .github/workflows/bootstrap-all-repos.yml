@@ -43,6 +43,7 @@ jobs:
 
       - name: Push caller workflow to each repo
         run: |
+          ENCODED="${{ steps.content.outputs.encoded }}"
           while IFS= read -r repo; do
             [ -z "$repo" ] && continue
             echo "→ Pushing to $repo..."
@@ -51,10 +52,10 @@ jobs:
               -H "Authorization: token $GH_TOKEN" \
               -H "Accept: application/vnd.github+json" \
               "https://api.github.com/repos/$repo/contents/.github/workflows/deploy.yml" \
-              -d '{
-                "message": "ci: add shared deploy workflow",
-                "content": "${{ steps.content.outputs.encoded }}"
-              }')
+              -d "{
+                \"message\": \"ci: add shared deploy workflow\",
+                \"content\": \"$ENCODED\"
+              }")
 
             URL=$(echo "$RESPONSE" | jq -r '.content.html_url // empty')
             ERROR=$(echo "$RESPONSE" | jq -r '.message // empty')
